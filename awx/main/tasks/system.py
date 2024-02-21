@@ -6,6 +6,7 @@ import itertools
 import json
 import logging
 import os
+import psycopg
 from io import StringIO
 from contextlib import redirect_stdout
 import shutil
@@ -630,10 +631,18 @@ def cluster_node_heartbeat(dispatch_time=None, worker_tasks=None):
                 logger.error("Host {} last checked in at {}, marked as lost.".format(other_inst.hostname, other_inst.last_seen))
 
         except DatabaseError as e:
-            if 'did not affect any rows' in str(e):
-                logger.debug('Another instance has marked {} as lost'.format(other_inst.hostname))
+            cause = e.__cause__
+            if cause and hasattr(cause, 'sqlstate'):
+                sqlstate = cause.sqlstate
+                sqlstate_str = psycopg.errors.lookup(sqlstate)
+                logger.debug('SQL Error state: {} - {}'.format(sqlstate, sqlstate_str))
+
+                if sqlstate == psycopg.errors.NoData:
+                    logger.debug('Another instance has marked {} as lost'.format(other_inst.hostname))
+                else:
+                    logger.exception("Error marking {} as lost.".format(other_inst.hostname))
             else:
-                logger.exception('Error marking {} as lost'.format(other_inst.hostname))
+                logger.exception('No SQL state available.  Error marking {} as lost'.format(other_inst.hostname))
 
     # Run local reaper
     if worker_tasks is not None:
@@ -788,10 +797,16 @@ def update_inventory_computed_fields(inventory_id):
     try:
         i.update_computed_fields()
     except DatabaseError as e:
-        if 'did not affect any rows' in str(e):
-            logger.debug('Exiting duplicate update_inventory_computed_fields task.')
-            return
-        raise
+        cause = e.__cause__
+        if cause and hasattr(cause, 'sqlstate'):
+            sqlstate = cause.sqlstate
+            sqlstate_str = psycopg.errors.lookup(sqlstate)
+            logger.error('SQL Error state: {} - {}'.format(sqlstate, sqlstate_str))
+        # To my knowledge no database or library raises an expcetion for "did not affect any rows".
+        # xxx.rowcount on update/delete shoud be used to determined affected rows.
+        # Not sure how an expcetion is thrown from update_computed_fields()
+        else:
+            logger.debug('Exiting duplicate update_inventory_computed_fields task. {}'.format(str(e)))
 
 
 def update_smart_memberships_for_inventory(smart_inventory):
