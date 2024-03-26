@@ -205,6 +205,18 @@ def run_until_complete(node, timing_data=None, **kwargs):
         stdout = resultfile.read()
         stdout = str(stdout, encoding='utf-8')
 
+        if state_name.lower() == 'failed':
+            work_detail = status.get('Detail', '')
+            if work_detail:
+                if stdout:
+                    raise RemoteJobError(f'Receptor error from {node}, detail:\n{work_detail}\nstdout:\n{stdout}')
+                else:
+                    raise RemoteJobError(f'Receptor error from {node}, detail:\n{work_detail}')
+            else:
+                raise RemoteJobError(f'Unknown ansible-runner error on node {node}, stdout:\n{stdout}')
+    except RemoteJobError as e:
+        logger.warning(e)
+        
     finally:
         if settings.RECEPTOR_RELEASE_WORK:
             res = receptor_ctl.simple_command(f"work release {unit_id}")
@@ -212,17 +224,6 @@ def run_until_complete(node, timing_data=None, **kwargs):
                 logger.warning(f'Could not confirm release of receptor work unit id {unit_id} from {node}, data: {res}')
 
         receptor_ctl.close()
-
-    if state_name.lower() == 'failed':
-        work_detail = status.get('Detail', '')
-        if work_detail:
-            if stdout:
-                raise RemoteJobError(f'Receptor error from {node}, detail:\n{work_detail}\nstdout:\n{stdout}')
-            else:
-                raise RemoteJobError(f'Receptor error from {node}, detail:\n{work_detail}')
-        else:
-            raise RemoteJobError(f'Unknown ansible-runner error on node {node}, stdout:\n{stdout}')
-
     return stdout
 
 
